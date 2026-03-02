@@ -3,9 +3,23 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = "https://en.wikivoyage.org/w/api.php";
 const USER_AGENT = "MCP-Wikivoyage-Server/1.0 (travel planning tool)";
+
+// Load README content for resource exposure
+function getReadmeContent(): string {
+  try {
+    const readmePath = resolve(__dirname, "../README.md");
+    return readFileSync(readmePath, "utf-8");
+  } catch (error) {
+    return "# Wikivoyage MCP Server\n\nTravel destination information via Wikivoyage API.\n\n## Tools\n- wikivoyage_search: Search for travel destinations\n- wikivoyage_get_guide: Get full travel guide\n- wikivoyage_get_section: Get specific section\n";
+  }
+}
 
 async function wikiRequest(params: Record<string, string>): Promise<any> {
   const url = new URL(BASE_URL);
@@ -20,7 +34,9 @@ async function wikiRequest(params: Record<string, string>): Promise<any> {
   });
 
   if (!response.ok) {
-    throw new Error(`Wikivoyage API error: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Wikivoyage API error: ${response.status} ${response.statusText}`,
+    );
   }
 
   return response.json();
@@ -46,13 +62,31 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Register README as a resource for MCP clients to access
+server.registerResource(
+  "readme",
+  "readme://wikivoyage",
+  {
+    title: "Wikivoyage MCP Server README",
+    description: "Documentation and usage guide for the Wikivoyage MCP server",
+    mimeType: "text/markdown",
+  },
+  async (uri) => ({
+    contents: [{ uri: uri.href, text: getReadmeContent() }],
+  }),
+);
+
 // Tool 1: Search for travel destinations
 server.tool(
   "wikivoyage_search",
   "Search Wikivoyage for travel destinations and guides",
   {
     query: z.string().describe("Search query for travel destinations"),
-    limit: z.number().optional().default(5).describe("Max results to return (default 5)"),
+    limit: z
+      .number()
+      .optional()
+      .default(5)
+      .describe("Max results to return (default 5)"),
   },
   async ({ query, limit }) => {
     const data = await wikiRequest({
@@ -66,7 +100,12 @@ server.tool(
 
     if (results.length === 0) {
       return {
-        content: [{ type: "text" as const, text: `No Wikivoyage results found for "${query}".` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `No Wikivoyage results found for "${query}".`,
+          },
+        ],
       };
     }
 
@@ -85,7 +124,7 @@ server.tool(
         },
       ],
     };
-  }
+  },
 );
 
 // Tool 2: Get full travel guide
@@ -93,7 +132,9 @@ server.tool(
   "wikivoyage_get_guide",
   "Get the full travel guide for a destination from Wikivoyage",
   {
-    destination: z.string().describe("Page title of the destination (e.g. 'Paris', 'Barcelona')"),
+    destination: z
+      .string()
+      .describe("Page title of the destination (e.g. 'Paris', 'Barcelona')"),
   },
   async ({ destination }) => {
     const data = await wikiRequest({
@@ -108,7 +149,12 @@ server.tool(
 
     if (!page || page.missing !== undefined) {
       return {
-        content: [{ type: "text" as const, text: `No Wikivoyage guide found for "${destination}". Try searching with wikivoyage_search first.` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `No Wikivoyage guide found for "${destination}". Try searching with wikivoyage_search first.`,
+          },
+        ],
       };
     }
 
@@ -129,7 +175,7 @@ server.tool(
     return {
       content: [{ type: "text" as const, text }],
     };
-  }
+  },
 );
 
 // Tool 3: Get specific section
@@ -137,8 +183,14 @@ server.tool(
   "wikivoyage_get_section",
   "Get a specific section of a destination guide (e.g. Eat, Sleep, See, Do, Get in)",
   {
-    destination: z.string().describe("Page title of the destination (e.g. 'Paris', 'Barcelona')"),
-    section: z.string().describe("Section name (e.g. 'Eat', 'Sleep', 'Drink', 'See', 'Do', 'Get in', 'Get around')"),
+    destination: z
+      .string()
+      .describe("Page title of the destination (e.g. 'Paris', 'Barcelona')"),
+    section: z
+      .string()
+      .describe(
+        "Section name (e.g. 'Eat', 'Sleep', 'Drink', 'See', 'Do', 'Get in', 'Get around')",
+      ),
   },
   async ({ destination, section }) => {
     // First, get sections list
@@ -150,7 +202,12 @@ server.tool(
 
     if (sectionsData.error) {
       return {
-        content: [{ type: "text" as const, text: `Error: ${sectionsData.error.info ?? "Could not find page"}. Try searching with wikivoyage_search first.` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${sectionsData.error.info ?? "Could not find page"}. Try searching with wikivoyage_search first.`,
+          },
+        ],
       };
     }
 
@@ -158,7 +215,7 @@ server.tool(
     const sectionLower = section.toLowerCase();
 
     const match = sections.find(
-      (s: any) => s.line.toLowerCase() === sectionLower
+      (s: any) => s.line.toLowerCase() === sectionLower,
     );
 
     if (!match) {
@@ -186,7 +243,12 @@ server.tool(
 
     if (!plainText) {
       return {
-        content: [{ type: "text" as const, text: `The "${section}" section for ${destination} appears to be empty.` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `The "${section}" section for ${destination} appears to be empty.`,
+          },
+        ],
       };
     }
 
@@ -198,7 +260,7 @@ server.tool(
         },
       ],
     };
-  }
+  },
 );
 
 async function main() {
